@@ -1,0 +1,4 @@
+local_runs/
+pretrained_models/
+trained_policies/
+*__pycache__*
