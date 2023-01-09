@@ -1,0 +1,33 @@
+agent: td3
+
+# net params
+lr: 3e-4
+channels: 64
+hidden_size: 256
+
+# algo params
+max_action: ???
+discount: 0.99
+tau: 0.005
+policy_noise: 0.2
+noise_clip: 0.5
+actor_update_freq: 2
+
+actor:
+  max_action: ${max_action}
+  act: relu
+  
+  # imgs based
+  channels: ${channels}
+
+  # state based
+  hidden_size: ${hidden_size}
+
+critic:
+  act: relu
+
+  # imgs based
+  channels: ${channels}
+
+  # state based
+  hidden_size: ${hidden_size}

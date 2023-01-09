@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
-from mbrl.common import SACActor, SACCritic
+from mbrl.common import SACActor, Critic
 from mbrl.utils import soft_update_params
 from utils import get_optimizer
 from memory import Batch
@@ -9,13 +9,12 @@ from memory import Batch
 class SAC:
     def __init__(self, cfg):
         # init everything
-        self.device = torch.device(cfg.device)
-        self.actor = SACActor(cfg.actor).to(self.device)
-        self.critic = SACCritic(cfg.critic).to(self.device)
-        self.target_critic = SACCritic(cfg.critic).to(self.device)
+        self.actor = SACActor(cfg.actor)
+        self.critic = Critic(cfg.critic)
+        self.target_critic = Critic(cfg.critic)
         self.target_critic.load_state_dict(self.critic.state_dict())
         
-        self.log_alpha = torch.tensor(np.log(cfg.init_temp)).to(self.device)
+        self.log_alpha = torch.tensor(np.log(cfg.init_temp))
         self.log_alpha.requires_grad = True
         self.target_entropy = -np.prod(cfg.action_dim)
         
@@ -41,12 +40,19 @@ class SAC:
         self.actor.train(training)
         self.critic.train(training)
         
+    def to(self, device: torch.device):
+        self.actor = self.actor.to(device)
+        self.critic = self.critic.to(device)
+        self.target_critic = self.target_critic.to(device)
+        self.log_alpha = self.log_alpha.to(device)
+        return self
+        
     @property
     def alpha(self):
         return self.log_alpha.exp()
     
     def act(self, s, sample=False):
-        s = torch.FloatTensor(s).to(self.device)
+        s = torch.from_numpy(s)
         dist = self.actor(s)
         action = dist.sample() if sample else dist.mean
         action = torch.clamp(action, self.min_action, self.max_action)

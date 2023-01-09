@@ -20,11 +20,10 @@ class Encoder(nn.Module):
                 nn.Conv2d(cfg.channels, cfg.channels, kernel_size=3, stride=1),
                 act,
                 nn.Conv2d(cfg.channels, cfg.channels, kernel_size=3, stride=1),
-                act,
-                nn.Flatten()
-            )
-            out_shape = conv_out_dim(cfg.state_dim, self.trunk)
-            self.repr_dim = np.prod(out_shape)
+                act
+            ).apply(initialize_weights_tf2)
+            self.flatten = nn.Flatten()
+            self.out_size = conv_out_size(cfg.state_dim, self.trunk)
         else:
             state_dim = cfg.state_dim[0]
             self.trunk = nn.Sequential(
@@ -35,21 +34,27 @@ class Encoder(nn.Module):
                 nn.Linear(cfg.hidden_size, cfg.hidden_size),
                 act,
                 nn.Linear(cfg.hidden_size, cfg.hidden_size)
-            )
-            self.repr_dim = cfg.hidden_size
+            ).apply(initialize_weights_tf2)
+            self.out_size = cfg.hidden_size
         
+        repr_dim = np.prod(self.out_size)
         self.feature_dim = cfg.feature_dim
-        self.fc = nn.Linear(self.repr_dim, self.feature_dim)
-        self.apply(initialize_weights_tf2)
+        self.fc = nn.Linear(repr_dim, self.feature_dim)
     
     def forward(self, x: torch.Tensor):
         # x shape: (T, B, dims) because we're supposed to process sequences, or (B, dims) if no sequences
         ndim = x.dim()
+        if ndim >= 4:
+            # this means that x is a set of images, so we normalize
+            x = x / 255.0 - 0.5
+        
         if ndim % 2 == 1:
             T = x.size(0)
             x = flatten_seq(x)
             
         phix = self.trunk(x)
+        if ndim >= 4:
+            phix = self.flatten(x)
         phix = self.fc(phix)
         
         if ndim % 2 == 1:
@@ -58,24 +63,27 @@ class Encoder(nn.Module):
         return phix
     
 class Decoder(nn.Module):
-    def __init__(self, feature_dim, repr_dim, cfg):
+    def __init__(self, feature_dim: int, out_size: Tuple[int], cfg):
         super().__init__()
         
         act = get_activation(cfg.act)
+        
+        repr_dim = np.prod(out_size)
         self.fc = nn.Linear(feature_dim, repr_dim)
         
         self.state_ndim = len(cfg.state_dim)
         if self.state_ndim == 3:
-            self.unflatten = nn.Unflatten(-1, (repr_dim, 1, 1))
+            in_channel = cfg.state_dim[0]
+            self.unflatten = nn.Unflatten(-1, out_size)
             self.trunk = nn.Sequential(
-                nn.ConvTranspose2d(repr_dim, cfg.channels, kernel_size=3, stride=1),
+                nn.ConvTranspose2d(out_size[0], cfg.channels, kernel_size=3, stride=1),
                 act,
                 nn.ConvTranspose2d(cfg.channels, cfg.channels, kernel_size=3, stride=1),
                 act,
                 nn.ConvTranspose2d(cfg.channels, cfg.channels, kernel_size=3, stride=1),
                 act,
-                nn.ConvTranspose2d(cfg.channels, cfg.channels, kernel_size=3, stride=1)
-            )
+                nn.ConvTranspose2d(cfg.channels, in_channel, kernel_size=3, stride=1)
+            ).apply(initialize_weights_tf2)
         else:
             state_dim = cfg.state_dim[0]
             self.trunk = nn.Sequential(
@@ -86,9 +94,7 @@ class Decoder(nn.Module):
                 nn.Linear(cfg.hidden_size, cfg.hidden_size),
                 act,
                 nn.Linear(cfg.hidden_size, state_dim)
-            )
-        
-        self.apply(initialize_weights_tf2)
+            ).apply(initialize_weights_tf2)
     
     def forward(self, x: torch.Tensor):
         # x shape: (T, B, feature_dim) or (B, feature_dim)
@@ -110,42 +116,21 @@ class Decoder(nn.Module):
         return dist
     
 class RewardHead(nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, feature_dim, cfg):
         super().__init__()
         
         act = get_activation(cfg.act)
-        if len(cfg.state_dim) == 3:
-            in_channel = cfg.state_dim[0]
-            self.trunk = nn.Sequential(
-                nn.Conv2d(in_channel, cfg.channels, kernel_size=3, stride=1),
-                act,
-                nn.Conv2d(cfg.channels, cfg.channels, kernel_size=3, stride=1),
-                act,
-                nn.Conv2d(cfg.channels, cfg.channels, kernel_size=3, stride=1),
-                act,
-                nn.Conv2d(cfg.channels, cfg.channels, kernel_size=3, stride=1),
-                act,
-                nn.Flatten()
-            )
-            out_shape = conv_out_dim(cfg.state_dim, self.trunk)
-            repr_dim = np.prod(out_shape)
-        else:
-            state_dim = cfg.state_dim[0]
-            self.trunk = nn.Sequential(
-                nn.Linear(state_dim, cfg.hidden_size),
-                act,
-                nn.Linear(cfg.hidden_size, cfg.hidden_size),
-                act,
-                nn.Linear(cfg.hidden_size, cfg.hidden_size),
-                act,
-                nn.Linear(cfg.hidden_size, cfg.hidden_size)
-            )
-            repr_dim = cfg.hidden_size
-            
-        self.fc = nn.Linear(repr_dim, 1)
-    
-    def forward(self, state, action):
-        pass
+        self.net = nn.Sequential(
+            nn.Linear(feature_dim, cfg.hidden_size),
+            act,
+            nn.Linear(cfg.hidden_size, cfg.hidden_size),
+            act,
+            nn.Linear(cfg.hidden_size, cfg.hidden_size),
+            act,
+            nn.Linear(cfg.hidden_size, cfg.hidden_size),
+            act,
+            nn.Linear(cfg.hidden_size, 1)
+        ).apply(initialize_weights_tf2)
 
 class NormGRUCell(nn.Module):
     def __init__(self, input_size, hidden_size):
@@ -178,8 +163,8 @@ def get_gru(gru_type):
     else:
         raise NotImplementedError("Choose either gru or gru_layernorm")
     
-    
 # ================== Actor / Critic ==================
+
 class SACActor(nn.Module):
     '''Actor for SAC agent.'''
     def __init__(self, cfg):
@@ -202,8 +187,7 @@ class SACActor(nn.Module):
                 act,
                 nn.Flatten()
             )
-            out_shape = conv_out_dim(cfg.state_dim, self.trunk)
-            repr_dim = np.prod(out_shape)
+            repr_dim = conv_out_size(cfg.state_dim, self.trunk)
         else:
             state_dim = cfg.state_dim[0]
             self.trunk = nn.Sequential(
@@ -230,9 +214,50 @@ class SACActor(nn.Module):
         
         dist = SquashedNormal(mu, std)
         return dist
+
+class TD3Actor(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.max_action = cfg.max_action
+        act = get_activation(cfg.act)
+        
+        if len(cfg.state_dim) == 3:
+            in_channel = cfg.state_dim[0]
+            self.trunk = nn.Sequential(
+                nn.Conv2d(in_channel, cfg.channels, kernel_size=3, stride=1),
+                act,
+                nn.Conv2d(cfg.channels, cfg.channels, kernel_size=3, stride=1),
+                act,
+                nn.Conv2d(cfg.channels, cfg.channels, kernel_size=3, stride=1),
+                act,
+                nn.Conv2d(cfg.channels, cfg.channels, kernel_size=3, stride=1),
+                act,
+                nn.Flatten()
+            )
+            repr_dim = conv_out_size(cfg.state_dim, self.trunk)
+        else:
+            state_dim = cfg.state_dim[0]
+            self.trunk = nn.Sequential(
+                nn.Linear(state_dim, cfg.hidden_size),
+                act,
+                nn.Linear(cfg.hidden_size, cfg.hidden_size),
+                act,
+                nn.Linear(cfg.hidden_size, cfg.hidden_size),
+                act,
+                nn.Linear(cfg.hidden_size, cfg.hidden_size)
+            )
+            repr_dim = cfg.hidden_size
+        
+        self.fc = nn.Linear(repr_dim, cfg.action_dim)
+        self.apply(agent_weight_init)
+        
+    def forward(self, x):
+        phix = self.trunk(x)
+        a = self.fc(phix)
+        return self.max_action * torch.tanh(a)
     
-class SACCritic(nn.Module):
-    '''Critic for SAC agent.'''
+class Critic(nn.Module):
+    '''Twin critic class generally, used by any agent.'''
     def __init__(self, cfg):
         super().__init__()
         act = get_activation(cfg.act)
@@ -250,13 +275,13 @@ class SACCritic(nn.Module):
                 act,
                 nn.Flatten()
             )
-            out_shape = conv_out_dim(cfg.state_dim, self.trunk)
-            repr_dim = np.prod(out_shape)
+            out_size = conv_out_size(cfg.state_dim, self.trunk)
         else:
             state_dim = cfg.state_dim[0]
             self.trunk = nn.Identity()
-            repr_dim = state_dim
+            out_size = state_dim
         
+        repr_dim = np.prod(out_size)
         self.q1 = nn.Sequential(
             nn.Linear(repr_dim + cfg.action_dim, cfg.hidden_size),
             act,
@@ -276,6 +301,14 @@ class SACCritic(nn.Module):
             nn.Linear(cfg.hidden_size, 1)
         )
         self.apply(agent_weight_init)
+        
+    def first_q(self, s: torch.Tensor, a: torch.Tensor):
+        assert s.size(0) == a.size(0), "not the same number of states and actions!"
+        
+        s = self.trunk(s)
+        sa = torch.cat([s, a], dim=-1)
+        q1 = self.q1(sa)
+        return q1
         
     def forward(self, s: torch.Tensor, a: torch.Tensor):
         assert s.size(0) == a.size(0), "not the same number of states and actions!"

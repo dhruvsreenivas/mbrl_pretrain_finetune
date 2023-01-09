@@ -1,0 +1,34 @@
+agent: sac
+
+# net params
+lr: 3e-4
+channels: 64
+hidden_size: 256
+
+# algo params
+init_temp: 1.0
+min_action: ???
+max_action: ???
+discount: 0.99
+tau: 0.005
+actor_update_freq: 2
+critic_update_freq: 1
+learn_temp: true
+
+actor:
+  act: relu
+  
+  # imgs based
+  channels: ${channels}
+
+  # state based
+  hidden_size: ${hidden_size}
+
+critic:
+  act: relu
+
+  # imgs based
+  channels: ${channels}
+
+  # state based
+  hidden_size: ${hidden_size}
