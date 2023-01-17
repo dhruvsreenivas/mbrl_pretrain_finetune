@@ -4,10 +4,17 @@ defaults:
   model@_global_: single_step
   agent@_global_: td3
 
+level: medium
 device: cuda
 state_dim: ???
 action_dim: ???
 
+# logging
+wandb: false
+
 model_training:
   epochs: 1000
   eval_freq: 100
+
+  batch_size: 256
+  num_workers: 1

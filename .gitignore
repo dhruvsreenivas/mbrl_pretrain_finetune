@@ -1,4 +1,5 @@
 local_runs/
+offline_data/
 pretrained_models/
 trained_policies/
 *__pycache__*

@@ -1,8 +1,12 @@
+import warnings
+warnings.filterwarnings("ignore")
+
 import torch
 from torch import nn, optim
 from typing import Iterator, Tuple, List, Any
 import numpy as np
 import gym
+import d4rl
 import random
 from stable_baselines3 import SAC
 from stable_baselines3.common.callbacks import CheckpointCallback
@@ -136,6 +140,12 @@ class AverageMeter:
         return self._sum / max(1, self._count)
     
 # ====================== DATA COLLECTION UTILS ======================
+
+def get_d4rl_dataset(task, level):
+    dataset_name = task + '-' + level + '-v0'
+    env = gym.make(dataset_name)
+    return d4rl.qlearning_dataset(env)
+
 def train_agent(env: gym.Env, steps=3000000, save_interval=10000, save_rb=False) -> List[Any]:
     '''Trains a SAC agent in the env, saving checkpoints as needed.'''
     print(env.name)
@@ -149,19 +159,19 @@ def train_agent(env: gym.Env, steps=3000000, save_interval=10000, save_rb=False)
         name_prefix=f'{env.name}_sac_online',
         save_replay_buffer=save_rb
     )
-    model.learn(steps, callback=chkptr)
+    model.learn(steps, callback=chkptr, eval_freq=100000)
     
 if __name__ == '__main__':
     # test agent training
     import metaworld
-    mt10 = metaworld.MT50()
+    mt50 = metaworld.MT50()
     tasks_of_interest = ['door-open-v2', 'door-close-v2', 'drawer-open-v2', 'drawer-close-v2']
     
     train_envs = []
     for name in tasks_of_interest:
         print(name)
-        env = mt10.train_classes[name]()
-        tasks = [task for task in mt10.train_tasks if task.env_name == name]
+        env = mt50.train_classes[name]()
+        tasks = [task for task in mt50.train_tasks if task.env_name == name]
         count = 0
         for task in tasks:
             env.set_task(task)
@@ -169,7 +179,10 @@ if __name__ == '__main__':
             train_envs.append(env)
             count += 1
     
-    print(len(train_envs))
+    print(f'Number of training envs: {len(train_envs)}')
+    for i in range(20):
+        env = train_envs[i]
+        train_agent(env)
     
     
     

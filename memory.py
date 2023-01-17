@@ -1,4 +1,4 @@
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, Dict
 import torch
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
@@ -14,14 +14,16 @@ class Batch(NamedTuple):
 class OfflineDataset(Dataset):
     def __init__(self,
                  device,
-                 states: np.ndarray,
-                 actions: np.ndarray,
-                 rewards: np.ndarray,
-                 next_states: np.ndarray,
-                 dones: np.ndarray):
+                 data: Dict[str, np.ndarray]):
         
         super().__init__()
         self.device = torch.device(device)
+        
+        states = data['observations']
+        actions = data['actions']
+        rewards = data['rewards']
+        next_states = data['next_observations']
+        dones = data['terminals']
         
         assert states.shape[0] == actions.shape[0] == rewards.shape[0] == next_states.shape[0] == dones.shape[0]
         self.states = torch.from_numpy(states).to(self.device)
@@ -29,8 +31,6 @@ class OfflineDataset(Dataset):
         self.rewards = torch.from_numpy(rewards).to(self.device)
         self.next_states = torch.from_numpy(next_states).to(self.device)
         self.dones = torch.from_numpy(next_states).to(self.device)
-        
-        self.traj_ends = np.flatnonzero(dones)
         
     def __len__(self):
         return self.states.size(0)
@@ -47,10 +47,10 @@ class OfflineDataset(Dataset):
         idx = np.random.randint(low=0, high=len(self))
         
         def closest_start_idx(i):
-            less = (self.traj_ends < i).astype(np.int32)
+            less = (self.dones < i).astype(np.int32)
             if np.max(less) == 0:
                 return 0
-            return np.max(np.nonzero(less))
+            return np.argmax(np.nonzero(less))
         
         start_idx = closest_start_idx(idx)
         if idx - start_idx > seq_len:
@@ -71,4 +71,4 @@ class OfflineDataset(Dataset):
         )
 
 def dataloader(ds: Dataset, bs: int, nw: int = 1):
-    return DataLoader(ds, batch_size=bs, shuffle=True, num_workers=nw)
+    return DataLoader(ds, batch_size=bs, shuffle=True, num_workers=nw, drop_last=True)

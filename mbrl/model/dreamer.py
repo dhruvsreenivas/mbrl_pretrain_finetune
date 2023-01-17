@@ -276,5 +276,11 @@ class WorldModel(nn.Module):
         kl_loss = self.rssm.kl(posts, priors)
         reward_loss = self.reward_loss(features, batch.rewards)
         
-        return rec_loss + self.kl_coef * kl_loss + self.reward_coef * reward_loss
+        metrics = {
+            'rec_loss': rec_loss.detach().cpu().item(),
+            'kl': kl_loss.detach().cpu().item(),
+            'reward_loss': reward_loss.detach().cpu().item()
+        }
+        
+        return rec_loss + self.kl_coef * kl_loss + self.reward_coef * reward_loss, metrics
         
